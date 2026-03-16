@@ -6,7 +6,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 from xgboost import XGBRegressor
 
 # ==============================
-# 1️⃣ Load Dataset
+#  Load Dataset
 # ==============================
 df = pd.read_csv("azure_dataset_3_service_types.csv")
 
@@ -15,13 +15,13 @@ df["Timestamp"] = pd.to_datetime(df["Timestamp"])
 df = df.sort_values("Timestamp")
 
 # ==============================
-# 2️⃣ Handle Missing Values
+#  Handle Missing Values
 # ==============================
 df["Usage_Hours"] = df["Usage_Hours"].interpolate()
 df["Azure_Demand"] = df["Azure_Demand"].interpolate()
 
 # ==============================
-# 3️⃣ Feature Engineering
+#  Feature Engineering
 # ==============================
 
 # Rolling Trend
@@ -46,7 +46,7 @@ df["Lag_7"] = df["Usage_Hours"].shift(7)
 df = df.fillna(0)
 
 # ==============================
-# 4️⃣ Define Features & Target
+# Define Features & Target
 # ==============================
 features = [
     "Usage_Hours", "Usage_7D_Avg", "Usage_Growth",
@@ -58,7 +58,7 @@ X = df[features]
 y = df["Azure_Demand"]
 
 # ==============================
-# 5️⃣ Time-Based Train-Test Split
+#  Time-Based Train-Test Split
 # ==============================
 split_index = int(len(df) * 0.8)
 
@@ -66,7 +66,7 @@ X_train, X_test = X[:split_index], X[split_index:]
 y_train, y_test = y[:split_index], y[split_index:]
 
 # ==============================
-# 6️⃣ Train XGBoost Model
+#  Train XGBoost Model
 # ==============================
 model = XGBRegressor(
     n_estimators=300,
@@ -78,7 +78,7 @@ model = XGBRegressor(
 model.fit(X_train, y_train)
 
 # ==============================
-# 7️⃣ Model Evaluation
+#  Model Evaluation
 # ==============================
 y_pred = model.predict(X_test)
 
@@ -90,7 +90,7 @@ print("MAE :", mae)
 print("RMSE:", rmse)
 
 # ==============================
-# 8️⃣ Feature Importance
+#  Feature Importance
 # ==============================
 importance = pd.Series(model.feature_importances_, index=features)
 importance.sort_values().plot(kind="barh")
@@ -98,7 +98,7 @@ plt.title("Feature Importance")
 plt.show()
 
 # ==============================
-# 9️⃣ 30-Day Forecast
+#   30-Day Forecast
 # ==============================
 
 future_days = 30
@@ -143,7 +143,7 @@ print("\nNext 30 Days Forecast")
 print(forecast_df[["Timestamp", "Azure_Demand"]])
 
 # ==============================
-# 🔟 Plot Historical + Forecast
+#  Plot Historical + Forecast
 # ==============================
 plt.figure(figsize=(12,6))
 plt.plot(df["Timestamp"], df["Azure_Demand"], label="Historical")
@@ -153,8 +153,8 @@ plt.title("Azure Demand - 30 Day Forecast")
 plt.show()
 
 # ==============================
-# 1️⃣1️⃣ Save Forecast
+# Save Forecast
 # ==============================
 forecast_df.to_csv("azure_30_day_forecast.csv", index=False)
 
-print("\n✅ Forecast saved as azure_30_day_forecast.csv")
+print("\n Forecast saved as azure_30_day_forecast.csv")
