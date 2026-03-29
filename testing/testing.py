@@ -1,4 +1,3 @@
-
 import pandas as pd
 import numpy as np
 from sklearn.metrics import mean_absolute_error, mean_squared_error
@@ -9,12 +8,6 @@ from lightgbm import LGBMRegressor
 from catboost import CatBoostRegressor
 import warnings
 warnings.filterwarnings('ignore')
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-import os
-
-from fastapi.responses import JSONResponse
 
 # ══════════════════════════════════════════════
 #  1. LOAD & SORT
@@ -284,19 +277,19 @@ train_rmse = np.sqrt(mean_squared_error(y_train, y_pred_train_final))
 test_mae   = mean_absolute_error(y_test,  y_pred_test_final)
 test_rmse  = np.sqrt(mean_squared_error(y_test,  y_pred_test_final))
 
-print("\n+======================================+")
-print("|        Model Performance             |")
-print("+======================================+")
-print(f"|  Train MAE  : {train_mae:>10.4f}            |")
-print(f"|  Train RMSE : {train_rmse:>10.4f}            |")
-print(f"|  Test  MAE  : {test_mae:>10.4f}  <- key    |")
-print(f"|  Test  RMSE : {test_rmse:>10.4f}  <- key    |")
-print("+======================================+")
+print("\n╔══════════════════════════════════════╗")
+print("║        Model Performance             ║")
+print("╠══════════════════════════════════════╣")
+print(f"║  Train MAE  : {train_mae:>10.4f}            ║")
+print(f"║  Train RMSE : {train_rmse:>10.4f}            ║")
+print(f"║  Test  MAE  : {test_mae:>10.4f}  ← key    ║")
+print(f"║  Test  RMSE : {test_rmse:>10.4f}  ← key    ║")
+print("╚══════════════════════════════════════╝")
 
 if test_rmse < 5:
-    print(f"\n[OK] TARGET MET -- Test RMSE {test_rmse:.4f} is below 5.0")
+    print(f"\n✅ TARGET MET — Test RMSE {test_rmse:.4f} is below 5.0")
 else:
-    print(f"\n[!!] Test RMSE {test_rmse:.4f} -- above target; check for noise floor in data.")
+    print(f"\n⚠️  Test RMSE {test_rmse:.4f} — above target; check for noise floor in data.")
 
 # ══════════════════════════════════════════════
 #  9. RETRAIN ON FULL DATA FOR FORECASTING
@@ -437,7 +430,7 @@ col_order = (["Timestamp", "Service_Type", "Region", "Azure_Demand"] +
               if c not in ["Timestamp","Service_Type","Region","Azure_Demand"]])
 forecast_df[col_order].to_csv("azure_30_day_forecast.csv", index=False)
 
-print("\nNext 30 Days Forecast -> azure_30_day_forecast.csv")
+print("\nNext 30 Days Forecast → azure_30_day_forecast.csv")
 print(f"Final Test RMSE : {test_rmse:.4f}")
 
 # ══════════════════════════════════════════════
@@ -585,7 +578,7 @@ for (service, region) in series_keys:
     fig.savefig(fname, dpi=150, bbox_inches="tight")
     plt.close(fig)
     plot_paths.append(fname)
-    print(f"   Saved -> {fname}")
+    print(f"   Saved → {fname}")
 
     # ════════════════════════════════════════════════════════════════════════
     # PLOT 2 — Day-of-Week seasonality bar chart
@@ -617,7 +610,7 @@ for (service, region) in series_keys:
     fig2.savefig(fname2, dpi=150, bbox_inches="tight")
     plt.close(fig2)
     plot_paths.append(fname2)
-    print(f"   Saved -> {fname2}")
+    print(f"   Saved → {fname2}")
 
     # ════════════════════════════════════════════════════════════════════════
     # PLOT 3 — Weekly aggregated forecast bar chart
@@ -651,7 +644,7 @@ for (service, region) in series_keys:
     fig3.savefig(fname3, dpi=150, bbox_inches="tight")
     plt.close(fig3)
     plot_paths.append(fname3)
-    print(f"   Saved -> {fname3}")
+    print(f"   Saved → {fname3}")
 
 # ════════════════════════════════════════════════════════════════════════════
 # PLOT 4 — All-series forecast comparison (one panel per series, grid layout)
@@ -711,58 +704,8 @@ comparison_path = "forecast_plots/all_series_comparison.png"
 fig4.savefig(comparison_path, dpi=150, bbox_inches="tight")
 plt.close(fig4)
 plot_paths.append(comparison_path)
-print(f"   Saved -> {comparison_path}")
+print(f"   Saved → {comparison_path}")
 
-print(f"\n[OK] {len(plot_paths)} plots saved to forecast_plots/")
-print("    Per-series plots : overview - day-of-week seasonality - weekly aggregation")
+print(f"\n✅  {len(plot_paths)} plots saved to forecast_plots/")
+print("    Per-series plots : overview · day-of-week seasonality · weekly aggregation")
 print("    Summary plot     : all_series_comparison.png")
-
-app= FastAPI(
-    title="Azure Demand Forecasting API",
-    description="Train an XGBoost + LightGBM + CatBoost stacked ensemble and forecast Azure demand.",
-    version="1.0.0",
-)
-
-# ── CORS (allow all origins for dev; tighten for production) ─────────────────
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# ── Static files — serve generated plot images ────────────────────────────────
-os.makedirs("forecast_plots", exist_ok=True)
-os.makedirs("static", exist_ok=True)
-app.mount("/plots", StaticFiles(directory="forecast_plots"), name="plots")
-
-# ── Inline endpoints (replaces missing app/routers) ──────────────────────────
-from fastapi.responses import HTMLResponse, FileResponse
-
-@app.get("/", response_class=HTMLResponse)
-def root():
-    return FileResponse("static/index.html")
-
-@app.get("/health")
-def health_check():
-    return {"status": "ok"}
-
-@app.get("/api/v1/metrics")
-def get_metrics():
-    return {
-        "train_mae": round(train_mae, 4),
-        "train_rmse": round(train_rmse, 4),
-        "test_mae": round(test_mae, 4),
-        "test_rmse": round(test_rmse, 4),
-    }
-
-@app.get("/api/v1/forecast")
-def get_forecast():
-    cols = ["Timestamp", "Service_Type", "Region", "Azure_Demand"]
-    data = forecast_df[cols].copy()
-    data["Timestamp"] = data["Timestamp"].astype(str)
-    return data.to_dict(orient="records")
-
-@app.get("/api/v1/plots")
-def list_plots():
-    return {"plots": plot_paths}

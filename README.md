@@ -1,31 +1,125 @@
-# Azure-Based-Demand-Forecasting-Capacity-Optimization-System-Group-2
+# Azure Demand Forecasting — FastAPI
 
-
-
-## 📝 Description
-
-The Azure-Based Demand Forecasting & Capacity Optimization System is a cutting-edge, cloud-native solution designed to bridge the gap between predictive analytics and operational execution. Built on the robust Microsoft Azure ecosystem, this system leverages advanced data processing to provide high-accuracy demand forecasts, enabling organizations to proactively manage their resources. By integrating intelligent capacity optimization algorithms, the platform ensures that infrastructure and supply chain assets are utilized at peak efficiency, reducing operational costs while maintaining superior service levels. This project serves as a comprehensive tool for businesses seeking to transform raw data into actionable insights for strategic planning and real-time resource management.
-
-## 📁 Project Structure
+## Project Structure
 
 ```
-.
-├── azure_dataset_3_service_types.csv
-└── data1.py
+fastapi_app/
+├── main.py                        # FastAPI app entry point
+├── requirements.txt
+├── forecast_plots/                # auto-created; PNG plots saved here
+└── app/
+    ├── core/
+    │   ├── schemas.py             # Pydantic request / response models
+    │   ├── model_store.py         # In-memory singleton for trained artefacts
+    │   ├── ml_engine.py           # Feature engineering, training, forecast logic
+    │   └── plotter.py             # All matplotlib plotting code
+    └── routers/
+        ├── health.py              # GET  /
+        ├── train.py               # POST /api/v1/train
+        ├── forecast.py            # POST /api/v1/forecast  + helpers
+        └── plots.py               # POST /api/v1/plots/generate + helpers
 ```
-
-## 👥 Contributing
-
-Contributions are welcome! Here's how you can help:
-
-1. **Fork** the repository
-2. **Clone** your fork: `git clone https://github.com/Madhavan2006/Azure-Based-Demand-Forecasting-Capacity-Optimization-System-Group-2.git`
-3. **Create** a new branch: `git checkout -b feature/your-feature`
-4. **Commit** your changes: `git commit -am 'Add some feature'`
-5. **Push** to your branch: `git push origin feature/your-feature`
-6. **Open** a pull request
-
-Please ensure your code follows the project's style guidelines and includes tests where applicable.
 
 ---
-*This README was generated with ❤️ by ReadmeBuddy*
+
+## Setup
+
+```bash
+# 1. Install dependencies
+pip install -r requirements.txt
+
+# 2. Place your dataset in the project root (or supply full path at train time)
+cp azure_dataset_3_service_types.csv fastapi_app/
+
+# 3. Start the server
+cd fastapi_app
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Interactive docs: **http://localhost:8000/docs**
+
+---
+
+## API Endpoints
+
+### Health
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/` | Health check — shows whether a model is loaded |
+
+### Training
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/train` | Train the full ensemble model |
+| GET  | `/api/v1/train/status` | Check if a background train is running |
+
+**Train request body:**
+```json
+{
+  "csv_path": "azure_dataset_3_service_types.csv",
+  "test_days": 30,
+  "forecast_days": 30
+}
+```
+
+### Forecast
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/forecast` | Run / re-run forecast, get JSON |
+| GET  | `/api/v1/forecast/series` | List all (service, region) combinations |
+| GET  | `/api/v1/forecast/download` | Download forecast as CSV |
+| GET  | `/api/v1/forecast/metrics` | Get MAE / RMSE metrics |
+
+**Forecast request body:**
+```json
+{
+  "service_type": "Virtual Machines",
+  "region": "East US",
+  "forecast_days": 30
+}
+```
+Omit `service_type` / `region` to get all series.
+
+### Plots
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/plots/generate` | Generate all PNG plots |
+| GET  | `/api/v1/plots/list` | List saved plot files |
+| GET  | `/api/v1/plots/view/{filename}` | View a single plot image |
+| GET  | `/plots/{filename}` | Static file access (served by Starlette) |
+
+**Plot request body:**
+```json
+{
+  "service_type": null,
+  "region": null,
+  "lookback_days": 90
+}
+```
+
+---
+
+## Typical Workflow
+
+```bash
+# 1. Train
+curl -X POST http://localhost:8000/api/v1/train \
+  -H "Content-Type: application/json" \
+  -d '{"csv_path": "azure_dataset_3_service_types.csv"}'
+
+# 2. Forecast (all series)
+curl -X POST http://localhost:8000/api/v1/forecast \
+  -H "Content-Type: application/json" \
+  -d '{"forecast_days": 30}'
+
+# 3. Generate plots
+curl -X POST http://localhost:8000/api/v1/plots/generate \
+  -H "Content-Type: application/json" \
+  -d '{"lookback_days": 90}'
+
+# 4. Download CSV
+curl http://localhost:8000/api/v1/forecast/download -o forecast.csv
+
+# 5. View a plot
+open http://localhost:8000/plots/all_series_comparison.png
+```

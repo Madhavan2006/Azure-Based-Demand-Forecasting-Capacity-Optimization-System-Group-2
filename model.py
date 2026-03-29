@@ -213,3 +213,5 @@ print(future_30[["ds","Service_Type","yhat","yhat_lower","yhat_upper"]])
 future_30.to_csv("azure_prophet_final_forecast.csv", index=False)
 
 print("\nForecast saved as azure_prophet_final_forecast.csv")
+
+print("RMSE:", rmse)
