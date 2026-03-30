@@ -7,6 +7,7 @@ from sklearn.linear_model import Ridge
 from xgboost import XGBRegressor
 from lightgbm import LGBMRegressor
 from catboost import CatBoostRegressor
+import pickle
 import warnings
 warnings.filterwarnings('ignore')
 from fastapi import FastAPI
@@ -439,6 +440,56 @@ forecast_df[col_order].to_csv("azure_30_day_forecast.csv", index=False)
 
 print("\nNext 30 Days Forecast -> azure_30_day_forecast.csv")
 print(f"Final Test RMSE : {test_rmse:.4f}")
+
+# ══════════════════════════════════════════════
+# 11b. SAVE MODEL ARTIFACTS AS PKL
+# ══════════════════════════════════════════════
+os.makedirs("model_artifacts", exist_ok=True)
+
+# Metrics dictionary
+metrics_dict = {
+    "train_mae":  train_mae,
+    "train_rmse": train_rmse,
+    "test_mae":   test_mae,
+    "test_rmse":  test_rmse,
+    "n_features": len(features),
+    "train_rows": len(train_df),
+    "test_rows":  len(test_df),
+    "xgb_best":   xgb.best_iteration,
+    "lgb_best":   lgb.best_iteration_,
+    "cb_best":    cb.best_iteration_,
+}
+with open("model_artifacts/metrics.pkl", "wb") as f:
+    pickle.dump(metrics_dict, f)
+
+# Label encoders
+with open("model_artifacts/le_service.pkl", "wb") as f:
+    pickle.dump(le_service, f)
+with open("model_artifacts/le_region.pkl", "wb") as f:
+    pickle.dump(le_region, f)
+
+# Final trained models (retrained on full data)
+with open("model_artifacts/final_xgb.pkl", "wb") as f:
+    pickle.dump(final_xgb, f)
+with open("model_artifacts/final_lgb.pkl", "wb") as f:
+    pickle.dump(final_lgb, f)
+with open("model_artifacts/final_cb.pkl", "wb") as f:
+    pickle.dump(final_cb, f)
+
+# Meta-learner (Ridge) and residual corrector
+with open("model_artifacts/meta_ridge.pkl", "wb") as f:
+    pickle.dump(meta, f)
+with open("model_artifacts/res_model.pkl", "wb") as f:
+    pickle.dump(final_res, f)
+
+# Feature list
+with open("model_artifacts/features.pkl", "wb") as f:
+    pickle.dump(features, f)
+
+print("\n[PKL] All model artifacts saved to model_artifacts/")
+print("   metrics.pkl, le_service.pkl, le_region.pkl")
+print("   final_xgb.pkl, final_lgb.pkl, final_cb.pkl")
+print("   meta_ridge.pkl, res_model.pkl, features.pkl")
 
 # ══════════════════════════════════════════════
 # 12. PLOTS

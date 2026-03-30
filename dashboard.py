@@ -277,153 +277,15 @@ def load_plots():
     return sorted(glob.glob(os.path.join(plot_dir, "*.png")))
 
 @st.cache_data
-def run_model_metrics():
-    """Run the stacked ensemble from model2 and return metrics dict."""
-    from sklearn.preprocessing import LabelEncoder
-    from sklearn.linear_model import Ridge
-    from xgboost import XGBRegressor
-    from lightgbm import LGBMRegressor
-    from catboost import CatBoostRegressor
-    import warnings
-    warnings.filterwarnings("ignore")
+def load_model_metrics():
+    """Load pre-computed metrics from model_artifacts/metrics.pkl."""
+    pkl_path = os.path.join("model_artifacts", "metrics.pkl")
+    if os.path.exists(pkl_path):
+        import pickle
+        with open(pkl_path, "rb") as f:
+            return pickle.load(f)
+    return None
 
-    df = pd.read_csv("azure_dataset_3_service_types.csv")
-    df["Timestamp"] = pd.to_datetime(df["Timestamp"])
-    df = df.sort_values(["Service_Type", "Region", "Timestamp"]).reset_index(drop=True)
-
-    le_service = LabelEncoder()
-    le_region = LabelEncoder()
-    df["Service_Type_Encoded"] = le_service.fit_transform(df["Service_Type"])
-    df["Region_Encoded"] = le_region.fit_transform(df["Region"])
-
-    def create_features(group):
-        g = group.copy().sort_values("Timestamp").reset_index(drop=True)
-        g["Usage_Hours"] = g["Usage_Hours"].interpolate().bfill().ffill()
-        g["Azure_Demand"] = g["Azure_Demand"].interpolate().bfill().ffill()
-        u, d = g["Usage_Hours"], g["Azure_Demand"]
-        for lag in [1,2,3,4,5,6,7,14,21,28,30]:
-            g[f"U_Lag_{lag}"] = u.shift(lag).fillna(0)
-            g[f"D_Lag_{lag}"] = d.shift(lag).fillna(0)
-        for w in [7,14,30]:
-            g[f"U_Roll{w}_Mean"] = u.rolling(w, min_periods=1).mean()
-            g[f"U_Roll{w}_Std"]  = u.rolling(w, min_periods=1).std().fillna(0)
-            g[f"D_Roll{w}_Mean"] = d.rolling(w, min_periods=1).mean()
-            g[f"D_Roll{w}_Std"]  = d.rolling(w, min_periods=1).std().fillna(0)
-        g["U_Roll7_Min"] = u.rolling(7, min_periods=1).min()
-        g["U_Roll7_Max"] = u.rolling(7, min_periods=1).max()
-        g["D_Roll7_Min"] = d.rolling(7, min_periods=1).min()
-        g["D_Roll7_Max"] = d.rolling(7, min_periods=1).max()
-        for span in [3,7,14]:
-            g[f"U_EWM_{span}"] = u.ewm(span=span, adjust=False).mean()
-            g[f"D_EWM_{span}"] = d.ewm(span=span, adjust=False).mean()
-        g["D_Mom_1_7"]  = g["D_Lag_1"] - g["D_Lag_7"]
-        g["D_Mom_7_28"] = g["D_Lag_7"] - g["D_Lag_28"]
-        g["U_Growth"]   = u.pct_change().fillna(0)
-        g["D_Growth"]   = d.pct_change().fillna(0)
-        g["D_Ratio_7"]  = d / (g["D_Roll7_Mean"] + 1e-6)
-        g["D_Ratio_30"] = d / (g["D_Roll30_Mean"] + 1e-6)
-        g["DOW"]        = g["Timestamp"].dt.dayofweek
-        g["Month"]      = g["Timestamp"].dt.month
-        g["Quarter"]    = g["Timestamp"].dt.quarter
-        g["WOY"]        = g["Timestamp"].dt.isocalendar().week.astype(int)
-        g["DOM"]        = g["Timestamp"].dt.day
-        g["Year"]       = g["Timestamp"].dt.year
-        g["Is_Weekend"] = g["DOW"].isin([5,6]).astype(int)
-        g["Is_MonFri"]  = g["DOW"].isin([0,4]).astype(int)
-        g["DOW_sin"]    = np.sin(2*np.pi*g["DOW"]/7)
-        g["DOW_cos"]    = np.cos(2*np.pi*g["DOW"]/7)
-        g["Month_sin"]  = np.sin(2*np.pi*g["Month"]/12)
-        g["Month_cos"]  = np.cos(2*np.pi*g["Month"]/12)
-        g["WOY_sin"]    = np.sin(2*np.pi*g["WOY"]/52)
-        g["WOY_cos"]    = np.cos(2*np.pi*g["WOY"]/52)
-        g["U_x_D_EWM7"]  = u * g["D_EWM_7"]
-        g["U_x_DOW_sin"] = u * g["DOW_sin"]
-        g["Spike"] = (u > g["U_Roll7_Mean"]*1.5).astype(int)
-        return g
-
-    df = df.groupby(["Service_Type","Region"]).apply(create_features).reset_index(drop=True)
-
-    def split_group(group):
-        group = group.sort_values("Timestamp").reset_index(drop=True)
-        group["split"] = "train"
-        group.loc[len(group)-30:, "split"] = "test"
-        return group
-    df = df.groupby(["Service_Type","Region"]).apply(split_group).reset_index(drop=True)
-
-    train_df = df[df["split"]=="train"].copy()
-    test_df  = df[df["split"]=="test"].copy()
-
-    lag_u = [f"U_Lag_{l}" for l in [1,2,3,4,5,6,7,14,21,28,30]]
-    lag_d = [f"D_Lag_{l}" for l in [1,2,3,4,5,6,7,14,21,28,30]]
-    roll_u = [f"U_Roll{w}_{s}" for w in [7,14,30] for s in ["Mean","Std"]] + ["U_Roll7_Min","U_Roll7_Max"]
-    roll_d = [f"D_Roll{w}_{s}" for w in [7,14,30] for s in ["Mean","Std"]] + ["D_Roll7_Min","D_Roll7_Max"]
-    ewm_c = [f"U_EWM_{s}" for s in [3,7,14]] + [f"D_EWM_{s}" for s in [3,7,14]]
-    mom_c = ["D_Mom_1_7","D_Mom_7_28","U_Growth","D_Growth","D_Ratio_7","D_Ratio_30"]
-    cal_c = ["DOW","Month","Quarter","WOY","DOM","Year","Is_Weekend","Is_MonFri",
-             "DOW_sin","DOW_cos","Month_sin","Month_cos","WOY_sin","WOY_cos"]
-    misc  = ["Service_Type_Encoded","Region_Encoded","Usage_Hours","U_x_D_EWM7","U_x_DOW_sin","Spike"]
-    features = misc + lag_u + lag_d + roll_u + roll_d + ewm_c + mom_c + cal_c
-
-    X_train = train_df[features]; y_train = train_df["Azure_Demand"]
-    X_test  = test_df[features];  y_test  = test_df["Azure_Demand"]
-
-    # XGBoost
-    xgb = XGBRegressor(n_estimators=3000, learning_rate=0.005, max_depth=4,
-        subsample=0.75, colsample_bytree=0.6, colsample_bylevel=0.6, colsample_bynode=0.6,
-        reg_alpha=0.5, reg_lambda=2.0, min_child_weight=15, gamma=0.2,
-        early_stopping_rounds=100, eval_metric="rmse", random_state=42, n_jobs=-1)
-    xgb.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=0)
-
-    # LightGBM
-    lgb = LGBMRegressor(n_estimators=3000, learning_rate=0.005, max_depth=6, num_leaves=31,
-        subsample=0.75, colsample_bytree=0.6, reg_alpha=0.5, reg_lambda=2.0,
-        min_child_samples=20, early_stopping_round=100, random_state=42, n_jobs=-1, verbose=-1)
-    lgb.fit(X_train, y_train, eval_set=[(X_test, y_test)])
-
-    # CatBoost
-    cb = CatBoostRegressor(iterations=3000, learning_rate=0.02, depth=5, l2_leaf_reg=3,
-        subsample=0.75, colsample_bylevel=0.6, min_data_in_leaf=15,
-        early_stopping_rounds=100, eval_metric="RMSE", random_seed=42, verbose=0)
-    cb.fit(X_train, y_train, eval_set=(X_test, y_test))
-
-    # Stack
-    xgb_tr, xgb_te = xgb.predict(X_train), xgb.predict(X_test)
-    lgb_tr, lgb_te = lgb.predict(X_train), lgb.predict(X_test)
-    cb_tr,  cb_te  = cb.predict(X_train),  cb.predict(X_test)
-
-    stack_train = np.column_stack([xgb_tr, lgb_tr, cb_tr,
-                                   (xgb_tr+lgb_tr)/2, (xgb_tr+cb_tr)/2, (lgb_tr+cb_tr)/2])
-    stack_test  = np.column_stack([xgb_te, lgb_te, cb_te,
-                                   (xgb_te+lgb_te)/2, (xgb_te+cb_te)/2, (lgb_te+cb_te)/2])
-
-    meta = Ridge(alpha=0.5)
-    meta.fit(stack_train, y_train)
-
-    y_pred_train = meta.predict(stack_train)
-    y_pred_test  = meta.predict(stack_test)
-
-    # Residual correction
-    res_model = XGBRegressor(n_estimators=500, learning_rate=0.01, max_depth=3,
-        subsample=0.7, colsample_bytree=0.6, reg_alpha=1.0, reg_lambda=2.0,
-        random_state=99, n_jobs=-1)
-    res_model.fit(X_train, y_train.values - y_pred_train, verbose=0)
-
-    y_pred_test_final  = y_pred_test  + res_model.predict(X_test)
-    y_pred_train_final = y_pred_train + res_model.predict(X_train)
-
-    from sklearn.metrics import mean_absolute_error, mean_squared_error
-    return {
-        "train_mae":  mean_absolute_error(y_train, y_pred_train_final),
-        "train_rmse": np.sqrt(mean_squared_error(y_train, y_pred_train_final)),
-        "test_mae":   mean_absolute_error(y_test, y_pred_test_final),
-        "test_rmse":  np.sqrt(mean_squared_error(y_test, y_pred_test_final)),
-        "n_features": len(features),
-        "train_rows": len(train_df),
-        "test_rows":  len(test_df),
-        "xgb_best":   xgb.best_iteration,
-        "lgb_best":   lgb.best_iteration_,
-        "cb_best":    cb.best_iteration_,
-    }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -488,9 +350,16 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # Model training trigger
-    st.markdown("##### Model Training")
-    train_btn = st.button("Train & Evaluate Model", type="primary", use_container_width=True)
+    # Model metrics loader
+    st.markdown("##### Model Metrics")
+    reload_btn = st.button("Reload Metrics from PKL", type="primary", use_container_width=True)
+
+    # Check pkl availability
+    pkl_exists = os.path.exists(os.path.join("model_artifacts", "metrics.pkl"))
+    if pkl_exists:
+        st.markdown('<span class="status-badge status-online" style="font-size:11px;">✅ PKL files found</span>', unsafe_allow_html=True)
+    else:
+        st.warning("No PKL files found. Run `model2.py` first.")
 
     st.markdown("---")
     st.markdown("""
@@ -523,12 +392,22 @@ tabs = st.tabs(["Performance Metrics", "Forecast Chart", "Demand Trends",
 with tabs[0]:
     st.markdown('<div class="section-header">Model Performance</div>', unsafe_allow_html=True)
 
-    if train_btn:
-        with st.spinner("Training XGBoost + LightGBM + CatBoost stacked ensemble..."):
-            metrics = run_model_metrics()
+    # Load metrics from PKL file (generated by model2.py)
+    if reload_btn:
+        st.cache_data.clear()
+        metrics = load_model_metrics()
+        if metrics:
             st.session_state["metrics"] = metrics
+            st.success("Metrics reloaded from PKL!")
+        else:
+            st.error("No metrics.pkl found. Run `python model2.py` first to generate model artifacts.")
     else:
+        # Try loading from session state first, then from PKL
         metrics = st.session_state.get("metrics", None)
+        if metrics is None:
+            metrics = load_model_metrics()
+            if metrics:
+                st.session_state["metrics"] = metrics
 
     if metrics:
         c1, c2, c3, c4 = st.columns(4)
